@@ -7,9 +7,7 @@ import argparse as ap
 import csv
 import multiprocessing as mp
 import os
-import sys
 from collections import defaultdict
-
 
 def process_prompt_params():
     """
@@ -86,12 +84,14 @@ def convert_binary_to_phredscores(chunk):
     :return: average_phredscores, a list of dictionaries with column (or line) numbers and average scores.
     """
     lines = chunk.split(b"\n")
+    # Filter empty lines at end of chunks
+    lines = [line for line in lines if line]
     numeric_values = defaultdict(list)  # every new key gets a list!
-
-    for index, line in enumerate(lines, start=1):
-        if index % 4 == 0:  # select fourth line additively
-            numeric_phredscores: list = process_to_numeric(line.strip()[1:])
-            for base_position, score in enumerate(numeric_phredscores, start=1):
+    for index, line in enumerate(lines, start=0):
+        if index % 4 == 3:  # select fourth line additivel
+            #print(line.strip())
+            numeric_phredscores: list = process_to_numeric(line.strip())
+            for base_position, score in enumerate(numeric_phredscores, start=0):
                 numeric_values[base_position].append(
                     score
                 )  # each new read add scores to corresponding base_position
@@ -108,101 +108,123 @@ def calculate_average_phredscores(all_phredscores: list):
     average_phredscores_per_base_position = defaultdict(
         list
     )  # new key receives a list!
-
-    for chunk_phredscores in all_phredscores:
+    
+    for chunks_results in range(len(all_phredscores)):
         for (
             base_position,
             phredscores,
-        ) in chunk_phredscores.items():  # type: int type: list
+        ) in all_phredscores[chunks_results].items():  # type: int type: list
             average_phredscores_per_base_position[base_position].extend(
                 phredscores
             )  # merge lists of same base position to new dict
     # create list of dictionaries that is compatible with CSV module that hold average phredscores per base position
+
     average_phredscores = [
         {
             "line_number": base_position,
             "average_phredscore": sum(phredscores) / len(phredscores),
         }
-        for base_position, phredscores in average_phredscores_per_base_position.items()
+        for base_position, phredscores in sorted(average_phredscores_per_base_position.items())
     ]
     return average_phredscores
 
 
-def process_chunk_wrapper(file_chunk_info):
-    """Wrapper function to unpack arguments."""
+def process_chunk(file_chunk_info):
+    """
+    Call functions to read a chunk of file in binary mode and
+    convert the bytes to numerical phredscores
+    """
     file_path, start, end = file_chunk_info
     chunk = read_binary_chunk(file_path, start, end)
     return convert_binary_to_phredscores(chunk)
 
 
+def check_read_completeness(file_path, start, end):
+    """Adjust the start and end positions to align with read boundaries."""
+    with open(file_path, "rb") as binary_file:
+        if start != 0: # If start is not byte 0, jump to the start of the new chunk
+            binary_file.seek(start) # set the file's cursor at start position
+            # Move to the start of the next read
+            while True:
+                line = binary_file.readline()
+                if not line or line.startswith(b"@"): # stop if end is reached or stop before a new read (preventing overlap between chunks)
+                    break # breaks the true loop
+            # Jump to the beginning of the first read, to ensure the starting boundary
+            start = binary_file.tell() - len(line) # after reading a line tell() returns the current position of the file pointer
+
+        # Adjust end position to the end of the current chunk and only start if not at end of original file
+        if end != os.path.getsize(file_path):
+            binary_file.seek(end) # set the file's cursor at start position
+            # Move to the end of the current read
+            while True:
+                line = binary_file.readline()
+                if not line or line.startswith(b"@"): # stop if end is reached or stop before a new read (preventing overlap between chunks)
+                    end = binary_file.tell() - len(line) # Jump to beginning of last line
+                    break # breaks the true loop
+
+    return file_path, start, end
+
+
 def process_fastq_file(file_path, cpus):
-    """Split file into chunks and process each chunk in parallel."""
+    """
+    Split file into chunks and process each chunk in parallel over n cpus.
+    It attempts to create 10 chunks and adds the remaining chunk at the end of chunk list.
+    """
     file_size = os.path.getsize(file_path)
     n_chunks = 10
     chunk_size = file_size // n_chunks  # tries 10 chunks
-    uneven_chunk = (
-        file_size % n_chunks
-    )  # determines remaining number of chunks possible
+    uneven_chunk = file_size % n_chunks  # determines remaining number of chunks possible
 
     # tuples of (filename, start e.g. = chunk_size * 0 = 0, end = 0 + 1 * chunk_size = chunk_size or file_size).
     # file_size is only chosen as last in the iteration
+
+    # add uneven_chunk at end of chunks list, for end the uneven_chunk is added to the largest chunk to reach the max or file_size
+    # First try all iterations in n_chunks with n_chunks -1. Finally, get the last chunk with i + 1
     chunks = [
-        (file_path, i * chunk_size, min((i + 1) * chunk_size, file_size))
+        check_read_completeness(
+            file_path,
+            i * chunk_size,
+            (i + 1) * chunk_size
+            if i < n_chunks - 1
+            else (i + 1) * chunk_size + uneven_chunk,
+        )
         for i in range(n_chunks)
     ]
-    # add uneven_chunk at end of chunks list, for end the uneven_chunk is added to the largest chunk to reach the max or file_size
-    chunks[-1] = (file_path, chunks[-1][1], chunks[-1][2] + uneven_chunk)
-
+    
     with mp.Pool(cpus) as pool:
-        results = pool.map(process_chunk_wrapper, chunks)  # chunks is an iterable
+        results = pool.map(process_chunk, chunks)  # chunks is an iterable
         # , process_chunk_wrapper is invoked n = length(chunk) times
 
         # for each chunk a dicionary with positions as keys and scores from all reads in that chunk as values
-        # e.g. 0 : [19, 19, 25, 24] the length of four is four reads on base position 0
-
-    # Flatten the list of lists and return a single list of results
+        # e.g. 0 : [19, 19, 25, 24] the length of four is four reads on base position
     positional_average_scores = calculate_average_phredscores(results)
     return positional_average_scores
 
 
 def choose_output_format(phredscores, output_file):
-    """
-    Function to decide what to do with presenting the results
-    to the user. Also, prints after deciding.
-    param: output_file : string
-
-    """
+    """                                                                 
+    Function to decide what to do with presenting the results           
+    to the user. Also, prints after deciding.                           
+    param: output_file : string   
+    """   
     fieldnames = ["line_number", "average_phredscore"]
-    if output_file:  # so if contents exist
+    if output_file: 
         with open(output_file, mode="w", encoding="UTF-8") as csvfile:
-            writer = csv.DictWriter(
-                csvfile, fieldnames=fieldnames
-            )  # use csv object for writing to a csv file
-
-            for (
-                key,
-                value,
-            ) in phredscores.items():  # column is the average_phredscore of that column
-                csvfile.write(key + "\n")
-                for average_score_column in range(len(value)): # pylint: disable=C0200
-                    writer.writerow(value[average_score_column])
-                csvfile.write("\n")
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames) # use csv object for writing to a csv file
+            for filename, base_scores in phredscores.items():
+                csvfile.write(filename)
+                for base_average_score in range(len(base_scores)): # pylint : disable=C0200
+                    writer.writerow(base_scores[base_average_score])
+                csvfile.write('\n')
         print(f"--Successfully written phredscores to {output_file}--")
-    else:
-        # Writing the data to CSV format
-        for (
-            key,
-            value,
-        ) in phredscores.items():  # column is the average_phredscore of that column
-            sys.stdout.write(key + "\n")
-            for average_score_column in range(len(value)): # pylint: disable=C0200
-                # print(value[average_score_column])
-                sys.stdout.write(
-                    ",".join(map(str, value[average_score_column].values())) + "\n"
-                )  # extract values and give comma separated style
-            sys.stdout.write("\n")
+    else: # print instead of write
+        for filename, base_scores in phredscores.items():
+            print(filename + "\n")
+            for base_average_score in range(len(base_scores)):
+                print(f"{base_scores[base_average_score]['line_number']},{base_scores[base_average_score]['average_phredscore']}")
+            print('\n')
 
-
+            
 if __name__ == "__main__":
     args = process_prompt_params()
 
@@ -211,9 +233,6 @@ if __name__ == "__main__":
         average_phred_scores = process_fastq_file(fastq_file, args.n)
         save_results[fastq_file] = average_phred_scores
 
-    FILE = None
-    if hasattr(args, "csvfile"):
-        FILE = args.csvfile
-
+    FILE = args.csvfile if hasattr(args, "csvfile") else None
     choose_output_format(save_results, output_file=FILE)
     print("--End of results--")
