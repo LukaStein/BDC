@@ -1,5 +1,5 @@
 """
-Script that calculates the average PHRED score per position i.e. column of a FastQ file en returns a VCF file with each position separated from its mean score.
+Script that calculates the average PHRED score per position i.e. column of a FastQ file en returns a CSV file with each position separated from its mean score.
 """
 
 # IMPORTS
