@@ -243,7 +243,7 @@ def choose_output_format(phredscores, output_file):
                 csvfile, fieldnames=fieldnames
             )  # use csv object for writing to a csv file
             for filename, base_scores in phredscores.items():
-                csvfile.write(filename)
+                csvfile.write(filename + "\n")
                 for base_average_score in range(len(base_scores)): # pylint: disable=C0200
                     writer.writerow(base_scores[base_average_score])
                 csvfile.write("\n")
