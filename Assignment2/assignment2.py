@@ -40,13 +40,13 @@ def parser():
         title="Arguments when run in server mode"
     )
     server_args.add_argument(
-            "-o",
-            action="store",
-            dest="csvfile",
-                required=False,
-            help="CSV file to save the output to. \
+        "-o",
+        action="store",
+        dest="csvfile",
+        required=False,
+        help="CSV file to save the output to. \
                               Defaulted output to terminal STDOUT",
-        )
+    )
     argparser.add_argument(
         "fastq_files",
         action="store",
@@ -115,7 +115,9 @@ class Parallel_processing:
 
     def runserver(self, fn, data, csvfile=None):
         # Start a shared manager server and access its queues
-        manager = self.make_server_manager(self.PORTNUM, b"whathasitgotinitspocketsesss?")
+        manager = self.make_server_manager(
+            self.PORTNUM, b"whathasitgotinitspocketsesss?"
+        )
         shared_job_q = manager.get_job_q()
         shared_result_q = manager.get_result_q()
 
@@ -127,14 +129,20 @@ class Parallel_processing:
             shared_job_q.put({"fn": fn, "arg": d})
         time.sleep(2)
         results = []
-        average_phredscores_per_base_position = defaultdict(list)  # new key receives a list!
+        average_phredscores_per_base_position = defaultdict(
+            list
+        )  # new key receives a list!
         while True:
             try:
                 result = shared_result_q.get_nowait()
-                results.append(result['result'])
-                for base_position,phredscores in result['result'].items():  # type: int type: lists
-                    average_phredscores_per_base_position[base_position].extend(phredscores)
-                #print("Got result!", result)
+                results.append(result["result"])
+                for base_position, phredscores in result[
+                    "result"
+                ].items():  # type: int type: lists
+                    average_phredscores_per_base_position[base_position].extend(
+                        phredscores
+                    )
+                # print("Got result!", result)
                 if len(results) == len(data):
                     print("Got all results!")
                     break
@@ -150,8 +158,11 @@ class Parallel_processing:
         time.sleep(5)
         print("Aaaaaand we're done for the server!")
         manager.shutdown()
-        #print(results)
-        self.write_results(self.calculate_average_phredscores(average_phredscores_per_base_position), csvfile)
+        # print(results)
+        self.write_results(
+            self.calculate_average_phredscores(average_phredscores_per_base_position),
+            csvfile,
+        )
 
     def calculate_average_phredscores(self, all_phredscores: dict):
         """
@@ -165,9 +176,7 @@ class Parallel_processing:
                 "line_number": base_position,
                 "average_phredscore": sum(phredscores) / len(phredscores),
             }
-            for base_position, phredscores in sorted(
-                all_phredscores.items()
-            )
+            for base_position, phredscores in sorted(all_phredscores.items())
         ]
 
     def write_results(self, phredscores_collection, outputfile):
@@ -179,13 +188,15 @@ class Parallel_processing:
                 )  # use csv object for writing to a csv file
                 csvfile.write(outputfile + "\n")
                 for phredscores in phredscores_collection:
-                        writer.writerow(phredscores)
+                    writer.writerow(phredscores)
                 csvfile.write("\n")
             print(f"--Successfully written phredscores to {outputfile}--")
         else:  # print instead of write
             print(outputfile + "\n")
             for phredscores in phredscores_collection:
-                print(f"{phredscores['line_number']},{phredscores['average_phredscore']}")
+                print(
+                    f"{phredscores['line_number']},{phredscores['average_phredscore']}"
+                )
             print("\n")
 
     def make_client_manager(self, ip, port, authkey):
@@ -213,7 +224,6 @@ class Parallel_processing:
         result_q = manager.get_result_q()
         self.run_workers(job_q, result_q, num_processes)
 
-
     def run_workers(self, job_q, result_q, num_processes):
         processes = []
         for p in range(num_processes):
@@ -223,7 +233,6 @@ class Parallel_processing:
         print("Started %s workers!" % len(processes))
         for temP in processes:
             temP.join()
-
 
     def peon(self, job_q, result_q):
         my_name = mp.current_process().name
@@ -260,7 +269,9 @@ class Mean_phredscore_calculator:
 
         for fastq_file in self.fastq_files:
             chunks = self.determine_chunks(fastq_file)
-            server = mp.Process(target=pp_m.runserver, args=(self.process_chunk, chunks, self.csvfile))
+            server = mp.Process(
+                target=pp_m.runserver, args=(self.process_chunk, chunks, self.csvfile)
+            )
             server.start()
             server.join()
 
@@ -280,7 +291,6 @@ class Mean_phredscore_calculator:
             )  # therefore, slicing a piece at end - start
         return binary_chunk
 
-
     def process_to_numeric(self, line: bytes):
         """
         Each byte is an 8-bit number (0-255), therefore extract each byte from the byte string (line)
@@ -289,7 +299,6 @@ class Mean_phredscore_calculator:
         :return: numerical representation of each quality line
         """
         return [byte - 33 for byte in line]  # numeric values
-
 
     def convert_binary_to_phredscores(self, chunk):
         """
@@ -310,7 +319,6 @@ class Mean_phredscore_calculator:
                     )  # each new read add scores to corresponding base_position
         return numeric_values
 
-
     def calculate_average_phredscores(self, all_phredscores: dict):
         """
         Calculate the average phredscore per column.
@@ -323,11 +331,8 @@ class Mean_phredscore_calculator:
                 "line_number": base_position,
                 "average_phredscore": sum(phredscores) / len(phredscores),
             }
-            for base_position, phredscores in sorted(
-                all_phredscores.items()
-            )
+            for base_position, phredscores in sorted(all_phredscores.items())
         ]
-
 
     def process_chunk(self, file_chunk_info):
         """
@@ -340,7 +345,6 @@ class Mean_phredscore_calculator:
         file_path, start, end = file_chunk_info
         chunk = self.read_binary_chunk(file_path, start, end)
         return self.convert_binary_to_phredscores(chunk)
-
 
     def check_read_completeness(self, file_path, start, end):
         """
@@ -380,7 +384,6 @@ class Mean_phredscore_calculator:
 
         return file_path, start, end
 
-
     def determine_chunks(self, file_path):
         """
         Split file into chunks and process each chunk in parallel over n cpus.
@@ -391,7 +394,9 @@ class Mean_phredscore_calculator:
         """
         file_size = os.path.getsize(file_path)
         chunk_size = file_size // self.n_chunks  # tries 10 chunks
-        uneven_chunk = file_size % self.n_chunks # determines remaining number of chunks possible
+        uneven_chunk = (
+            file_size % self.n_chunks
+        )  # determines remaining number of chunks possible
 
         # tuples of (filename, start e.g. = chunk_size * 0 = 0, end = 0 + 1 * chunk_size = chunk_size or file_size).
         # file_size is only chosen as last in the iteration
@@ -410,7 +415,6 @@ class Mean_phredscore_calculator:
         ]
         return chunks
 
-
     def choose_output_format(self, phredscores, output_file):
         """
         Function to decide what to do with presenting the results
@@ -425,18 +429,23 @@ class Mean_phredscore_calculator:
                 )  # use csv object for writing to a csv file
                 for filename, base_scores in phredscores.items():
                     csvfile.write(filename + "\n")
-                    for base_average_score in range(len(base_scores)): # pylint: disable=C0200
+                    for base_average_score in range(
+                        len(base_scores)
+                    ):  # pylint: disable=C0200
                         writer.writerow(base_scores[base_average_score])
                     csvfile.write("\n")
             print(f"--Successfully written phredscores to {output_file}--")
         else:  # print instead of write
             for filename, base_scores in phredscores.items():
                 print(filename + "\n")
-                for base_average_score in range(len(base_scores)): # pylint: disable=C0200
+                for base_average_score in range(
+                    len(base_scores)
+                ):  # pylint: disable=C0200
                     print(
                         f"{base_scores[base_average_score]['line_number']},{base_scores[base_average_score]['average_phredscore']}"
                     )
                 print("\n")
+
 
 if __name__ == "__main__":
     args = parser()
