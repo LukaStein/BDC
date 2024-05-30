@@ -40,13 +40,13 @@ def parser():
         title="Arguments when run in server mode"
     )
     server_args.add_argument(
-        "-o",
-        action="store",
-        dest="csvfile",
-        required=False,
-        help="CSV file to save the output to. \
+            "-o",
+            action="store",
+            dest="csvfile",
+                required=False,
+            help="CSV file to save the output to. \
                               Defaulted output to terminal STDOUT",
-    )
+        )
     argparser.add_argument(
         "fastq_files",
         action="store",
@@ -115,9 +115,7 @@ class Parallel_processing:
 
     def runserver(self, fn, data, csvfile=None):
         # Start a shared manager server and access its queues
-        manager = self.make_server_manager(
-            self.PORTNUM, b"whathasitgotinitspocketsesss?"
-        )
+        manager = self.make_server_manager(self.PORTNUM, b"whathasitgotinitspocketsesss?")
         shared_job_q = manager.get_job_q()
         shared_result_q = manager.get_result_q()
 
@@ -129,27 +127,29 @@ class Parallel_processing:
             shared_job_q.put({"fn": fn, "arg": d})
         time.sleep(2)
         results = []
-        average_phredscores_per_base_position = defaultdict(
-            list
-        )  # new key receives a list!
+        file_results = defaultdict()
         while True:
             try:
                 result = shared_result_q.get_nowait()
-                results.append(result["result"])
-                for base_position, phredscores in result[
-                    "result"
-                ].items():  # type: int type: lists
-                    average_phredscores_per_base_position[base_position].extend(
-                        phredscores
-                    )
-                # print("Got result!", result)
+                res_file = result['result'][0]
+                res_scores = result['result'][1]
+
+                if res_file not in file_results:
+                    file_results[res_file] = defaultdict(list)# baseposition : phredscores
+
+                results.append(res_scores)
+                #for file, score_chunks in res:
+                #for score_chunk in res[1]:
+                for base_position,phredscores in res_scores.items():  # type: int type: lists
+                    file_results[res_file][base_position].extend(phredscores)
+                #print(file_results[res_file])
+                #print("Got result!", result)
                 if len(results) == len(data):
                     print("Got all results!")
                     break
             except queue.Empty:
                 time.sleep(1)
                 continue
-
         # Tell the client process no more data will be forthcoming
         print("Time to kill some peons!")
         shared_job_q.put(self.POISONPILL)
@@ -158,11 +158,8 @@ class Parallel_processing:
         time.sleep(5)
         print("Aaaaaand we're done for the server!")
         manager.shutdown()
-        # print(results)
-        self.write_results(
-            self.calculate_average_phredscores(average_phredscores_per_base_position),
-            csvfile,
-        )
+        for file, aggregated_phredscores in file_results.items():
+            self.write_results(file, self.calculate_average_phredscores(aggregated_phredscores), csvfile)
 
     def calculate_average_phredscores(self, all_phredscores: dict):
         """
@@ -176,27 +173,27 @@ class Parallel_processing:
                 "line_number": base_position,
                 "average_phredscore": sum(phredscores) / len(phredscores),
             }
-            for base_position, phredscores in sorted(all_phredscores.items())
+            for base_position, phredscores in sorted(
+                all_phredscores.items()
+            )
         ]
 
-    def write_results(self, phredscores_collection, outputfile):
+    def write_results(self, filename : str, average_scores : list, outputfile : str):
         fieldnames = ["line_number", "average_phredscore"]
         if outputfile:
-            with open(outputfile, mode="w", encoding="UTF-8") as csvfile:
+            with open(outputfile, mode="a", encoding="UTF-8") as csvfile:
                 writer = csv.DictWriter(
                     csvfile, fieldnames=fieldnames
                 )  # use csv object for writing to a csv file
-                csvfile.write(outputfile + "\n")
-                for phredscores in phredscores_collection:
-                    writer.writerow(phredscores)
+                csvfile.write(filename + "\n")
+                for phredscores in average_scores:
+                        writer.writerow(phredscores)
                 csvfile.write("\n")
-            print(f"--Successfully written phredscores to {outputfile}--")
+            print(f"--Successfully written {filename} mean phredscores to {outputfile}--")
         else:  # print instead of write
-            print(outputfile + "\n")
-            for phredscores in phredscores_collection:
-                print(
-                    f"{phredscores['line_number']},{phredscores['average_phredscore']}"
-                )
+            print(filename + "\n")
+            for phredscores in average_scores:
+                print(f"{phredscores['line_number']},{phredscores['average_phredscore']}")
             print("\n")
 
     def make_client_manager(self, ip, port, authkey):
@@ -224,6 +221,7 @@ class Parallel_processing:
         result_q = manager.get_result_q()
         self.run_workers(job_q, result_q, num_processes)
 
+
     def run_workers(self, job_q, result_q, num_processes):
         processes = []
         for p in range(num_processes):
@@ -233,6 +231,7 @@ class Parallel_processing:
         print("Started %s workers!" % len(processes))
         for temP in processes:
             temP.join()
+
 
     def peon(self, job_q, result_q):
         my_name = mp.current_process().name
@@ -258,22 +257,9 @@ class Parallel_processing:
 
 
 class Mean_phredscore_calculator:
-    def __init__(self, fastq_files, n_chunks, csvfile, parallel_processing):
-        self.fastq_files = fastq_files
+    def __init__(self, n_chunks):
         self.n_chunks = n_chunks
-        self.csvfile = csvfile
-        self.pp_m = parallel_processing
 
-    def start_parallel_calculating(self):
-        scores = mp.Queue()
-
-        for fastq_file in self.fastq_files:
-            chunks = self.determine_chunks(fastq_file)
-            server = mp.Process(
-                target=pp_m.runserver, args=(self.process_chunk, chunks, self.csvfile)
-            )
-            server.start()
-            server.join()
 
     def read_binary_chunk(self, filename, start, end):
         """
@@ -291,6 +277,7 @@ class Mean_phredscore_calculator:
             )  # therefore, slicing a piece at end - start
         return binary_chunk
 
+
     def process_to_numeric(self, line: bytes):
         """
         Each byte is an 8-bit number (0-255), therefore extract each byte from the byte string (line)
@@ -299,6 +286,7 @@ class Mean_phredscore_calculator:
         :return: numerical representation of each quality line
         """
         return [byte - 33 for byte in line]  # numeric values
+
 
     def convert_binary_to_phredscores(self, chunk):
         """
@@ -319,6 +307,7 @@ class Mean_phredscore_calculator:
                     )  # each new read add scores to corresponding base_position
         return numeric_values
 
+
     def calculate_average_phredscores(self, all_phredscores: dict):
         """
         Calculate the average phredscore per column.
@@ -331,8 +320,11 @@ class Mean_phredscore_calculator:
                 "line_number": base_position,
                 "average_phredscore": sum(phredscores) / len(phredscores),
             }
-            for base_position, phredscores in sorted(all_phredscores.items())
+            for base_position, phredscores in sorted(
+                all_phredscores.items()
+            )
         ]
+
 
     def process_chunk(self, file_chunk_info):
         """
@@ -344,7 +336,8 @@ class Mean_phredscore_calculator:
         """
         file_path, start, end = file_chunk_info
         chunk = self.read_binary_chunk(file_path, start, end)
-        return self.convert_binary_to_phredscores(chunk)
+        return file_path, self.convert_binary_to_phredscores(chunk)
+
 
     def check_read_completeness(self, file_path, start, end):
         """
@@ -384,6 +377,7 @@ class Mean_phredscore_calculator:
 
         return file_path, start, end
 
+
     def determine_chunks(self, file_path):
         """
         Split file into chunks and process each chunk in parallel over n cpus.
@@ -394,9 +388,7 @@ class Mean_phredscore_calculator:
         """
         file_size = os.path.getsize(file_path)
         chunk_size = file_size // self.n_chunks  # tries 10 chunks
-        uneven_chunk = (
-            file_size % self.n_chunks
-        )  # determines remaining number of chunks possible
+        uneven_chunk = file_size % self.n_chunks # determines remaining number of chunks possible
 
         # tuples of (filename, start e.g. = chunk_size * 0 = 0, end = 0 + 1 * chunk_size = chunk_size or file_size).
         # file_size is only chosen as last in the iteration
@@ -415,37 +407,6 @@ class Mean_phredscore_calculator:
         ]
         return chunks
 
-    def choose_output_format(self, phredscores, output_file):
-        """
-        Function to decide what to do with presenting the results
-        to the user. Also, prints after deciding.
-        param: output_file : string
-        """
-        fieldnames = ["line_number", "average_phredscore"]
-        if output_file:
-            with open(output_file, mode="w", encoding="UTF-8") as csvfile:
-                writer = csv.DictWriter(
-                    csvfile, fieldnames=fieldnames
-                )  # use csv object for writing to a csv file
-                for filename, base_scores in phredscores.items():
-                    csvfile.write(filename + "\n")
-                    for base_average_score in range(
-                        len(base_scores)
-                    ):  # pylint: disable=C0200
-                        writer.writerow(base_scores[base_average_score])
-                    csvfile.write("\n")
-            print(f"--Successfully written phredscores to {output_file}--")
-        else:  # print instead of write
-            for filename, base_scores in phredscores.items():
-                print(filename + "\n")
-                for base_average_score in range(
-                    len(base_scores)
-                ):  # pylint: disable=C0200
-                    print(
-                        f"{base_scores[base_average_score]['line_number']},{base_scores[base_average_score]['average_phredscore']}"
-                    )
-                print("\n")
-
 
 if __name__ == "__main__":
     args = parser()
@@ -453,9 +414,14 @@ if __name__ == "__main__":
         print("Server mode!")
         FILE = args.csvfile if hasattr(args, "csvfile") else None
         pp_m = Parallel_processing(args.host, args.port)
-        m_ps_c = Mean_phredscore_calculator(args.fastq_files, args.chunks, FILE, pp_m)
-        m_ps_c.start_parallel_calculating()
+        m_ps_c = Mean_phredscore_calculator(args.chunks)
 
+        all_chunks = []
+        for fastq_file in args.fastq_files:
+            all_chunks += m_ps_c.determine_chunks(fastq_file)
+        server = mp.Process(target=pp_m.runserver, args=(m_ps_c.process_chunk, all_chunks, FILE))
+        server.start()
+        server.join()
         print("--End of results--")
 
     elif args.c:
