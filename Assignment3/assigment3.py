@@ -8,12 +8,16 @@ def process_to_numeric(line: bytes):
 def convert_binary_to_phredscores(chunk):
     lines = chunk.split(b"\n")
     lines = [line for line in lines if line]
-    numeric_values = defaultdict(list)
+    all_basepositions_with_scores = []
+    headers = []
     for index, line in enumerate(lines, start=0):
         numeric_phredscores = process_to_numeric(line.strip())
+        headers.append(len(line))
+        scores_per_line = {}
         for base_position, score in enumerate(numeric_phredscores, start=0):
-            numeric_values[base_position].append(score)
-    return numeric_values
+            scores_per_line |= {base_position:score}
+        all_basepositions_with_scores.append(scores_per_line)
+    return all_basepositions_with_scores, headers
 
 def calculate_average_phredscores(all_phredscores: dict):
         """
@@ -53,15 +57,11 @@ def write_results(filename: str, average_scores: list, outputfile: str):
             print("\n")
 
 def process_chunk():
-    phred_scores = convert_binary_to_phredscores(sys.stdin.buffer.read())
-    fieldnames = phred_scores.keys()
-    writer = csv.DictWriter(sys.stdout, fieldnames=fieldnames)
+    phred_scores, headers = convert_binary_to_phredscores(sys.stdin.buffer.read())
+    writer = csv.DictWriter(sys.stdout, fieldnames=range(max(headers)))
     writer.writeheader()
-    for position, value in enumerate(phred_scores.values()):
-        writer.writerow(value[position])
-    #for base_position, scores in sorted(phred_scores.items()):
-
-    #print(f"{base_position},{scores}", file=sys.stdout)
+    for base_position_score in range(len(phred_scores)):
+       writer.writerow(phred_scores[base_position_score])
 
 
 if __name__ == "__main__":
