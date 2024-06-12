@@ -7,29 +7,17 @@ import argparse as ap
 def process_prompt_params():
     """
     Using argparse enables this script to receive parameters
-    such as number of CPUs, fastqfile.fastq (or more in a list)
-    and optionally the name of the output file; otherwise presented
-    with STDOUT to terminal.
+    such as number of CPUs, fastqfile.fastq
 
-    param: -n <number_cpus>
-    param: -o <output csv file>
-    param: fastqfile1.fastq (no keyword required i.e. positional argument)
-    -> can also be a list with several files
-    [fastqfile1.fastq fastqfile2,fastq]
+    param: -calc # used to invoke the calculation step
+    param: -mean # used to invoke the mean calc step
+    param: -filename fastqfile1.fastq # will be printed above the output
 
     :return: args object containing all params as objects
     """
     argparser = ap.ArgumentParser(
         description="Script for assignment 1 \
                                   of Big Data Computing"
-    )
-    argparser.add_argument(
-        "-o",
-        action="store",
-        dest="csvfile",
-        required=False,
-        help="CSV file to save the output to. \
-                          Defaulted output to terminal STDOUT",
     )
     argparser.add_argument(
         "-calc",
@@ -46,11 +34,17 @@ def process_prompt_params():
                           Defaulted output to terminal STDOUT",
     )
     argparser.add_argument(
-        "fastq_files",
+        "-filename",
         action="store",
-        nargs="+",
-        help="At least 1 processable \
-                           Illumina Fastq Format file",
+        required=True,
+        help="1 Illumina .fastq Format filename",
+    )
+    argparser.add_argument(
+            "fastq_files",
+            action="store",
+            nargs="*",
+            help="At least 1 processable Illumina Fastq Format file. \
+            Acts as placeholder for the incoming data",
     )
     return argparser.parse_args()
 
@@ -63,10 +57,9 @@ def convert_binary_to_phredscores():
             numeric_phredscores = process_to_numeric(line.strip())
             print(*numeric_phredscores)
 
-def calculate_averages():
+def calculate_averages(filename):
     counts_per_basepair = []
     total_sums_per_basepair = []
-    line_count = 0
 
     for line in sys.stdin:
         if line.strip():
@@ -76,15 +69,17 @@ def calculate_averages():
                 total_sums_per_basepair = np.zeros(len(scores), dtype=int)
             counts_per_basepair += 1
             total_sums_per_basepair += scores
-            line_count += 1
+
     means = total_sums_per_basepair / counts_per_basepair
+    print(f"{filename}")
     for i, mean in enumerate(means, start=1):
         print(f"{i},{mean}")
+    print('')
 
 if __name__ == "__main__":
     args = process_prompt_params()
-    if args.calc:
-        convert_binary_to_phredscores()
-        #process_chunk()
-    if args.mean:
-        calculate_averages()
+    if args.filename:
+        if args.calc:
+            convert_binary_to_phredscores()
+        if args.mean:
+            calculate_averages(args.filename)
