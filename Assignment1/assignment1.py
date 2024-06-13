@@ -1,5 +1,5 @@
 """
-Script that calculates the average PHRED score per position i.e. column of a FastQ file en returns a CSV file with each position separated from its mean score.
+Script that calculates the average PHRED score per position i.e. column of a FastQ file en returns a VCF file with each position separated from its mean score.
 """
 
 # IMPORTS
@@ -39,10 +39,9 @@ def process_prompt_params():
     )
     argparser.add_argument(
         "-o",
-        action="store",
-        dest="csvfile",
+        action="store_true",
         required=False,
-        help="CSV file to save the output to. \
+        help="CSV file option to save the output to. \
                           Defaulted output to terminal STDOUT",
     )
     argparser.add_argument(
@@ -88,13 +87,14 @@ def convert_binary_to_phredscores(chunk):
     param: chunk, a slice of a FastQ file
     :return: average_phredscores, a list of dictionaries with column (or line) numbers and average scores.
     """
-    lines = chunk.split(b"\n")
+    mv = memoryview(chunk)
+    lines = mv.tobytes().split(b"\n")
+    #lines = chunk.split(b"\n")
     # Filter empty lines at end of chunks
     lines = [line for line in lines if line]
     numeric_values = defaultdict(list)  # every new key gets a list!
     for index, line in enumerate(lines, start=0):
         if index % 4 == 3:  # select fourth line additivel
-            # print(line.strip())
             numeric_phredscores: list = process_to_numeric(line.strip())
             for base_position, score in enumerate(numeric_phredscores, start=0):
                 numeric_values[base_position].append(
@@ -201,9 +201,7 @@ def process_fastq_file(file_path, cpus):
     file_size = os.path.getsize(file_path)
     n_chunks = 10
     chunk_size = file_size // n_chunks  # tries 10 chunks
-    uneven_chunk = (
-        file_size % n_chunks
-    )  # determines remaining number of chunks possible
+    uneven_chunk = file_size % n_chunks # determines remaining number of chunks possible
 
     # tuples of (filename, start e.g. = chunk_size * 0 = 0, end = 0 + 1 * chunk_size = chunk_size or file_size).
     # file_size is only chosen as last in the iteration
@@ -238,24 +236,22 @@ def choose_output_format(phredscores, output_file):
     """
     fieldnames = ["line_number", "average_phredscore"]
     if output_file:
-        with open(output_file, mode="w", encoding="UTF-8") as csvfile:
-            writer = csv.DictWriter(
-                csvfile, fieldnames=fieldnames
-            )  # use csv object for writing to a csv file
-            for filename, base_scores in phredscores.items():
-                csvfile.write(filename + "\n")
+        for filename, base_scores in phredscores.items():
+            with open(f"{os.path.basename(filename)}.output.csv", mode="w", encoding="UTF-8") as csvfile:
+                writer = csv.DictWriter(
+                    csvfile, fieldnames=fieldnames
+                )  # use csv object for writing to a csv file
                 for base_average_score in range(len(base_scores)): # pylint: disable=C0200
                     writer.writerow(base_scores[base_average_score])
-                csvfile.write("\n")
-        print(f"--Successfully written phredscores to {output_file}--")
+            print(f"--Successfully written phredscores to {os.path.basename(filename)}.output.csv--")
     else:  # print instead of write
         for filename, base_scores in phredscores.items():
-            print(filename + "\n")
+            print(os.path.basename(filename))
             for base_average_score in range(len(base_scores)): # pylint: disable=C0200
                 print(
                     f"{base_scores[base_average_score]['line_number']},{base_scores[base_average_score]['average_phredscore']}"
                 )
-            print("\n")
+            print("")
 
 
 if __name__ == "__main__":
@@ -266,6 +262,6 @@ if __name__ == "__main__":
         average_phred_scores = process_fastq_file(fastq_file, args.n)
         save_results[fastq_file] = average_phred_scores
 
-    FILE = args.csvfile if hasattr(args, "csvfile") else None
+    FILE = True if args.o else False
     choose_output_format(save_results, output_file=FILE)
     print("--End of results--")
