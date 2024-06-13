@@ -19,4 +19,4 @@ export LOCATE_DIR
 export CORES
 
 # Invoke function parallel for all files in the arguments
-parallel process_fastq_to_meanscores ::: "$@" 1> fastqbestand1.fastq.output.csv
+parallel process_fastq_to_meanscores ::: "$@" 1> output.csv
