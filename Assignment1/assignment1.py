@@ -37,11 +37,12 @@ def process_prompt_params():
     )
     argparser.add_argument(
         "-o",
-        action="store_true",
+        action="store",
+        dest="csvfile",
+        type=ap.FileType("w", encoding="UTF-8"),
         required=False,
-        help="CSV file option to save the output to. \
-                      Defaulted output to terminal STDOUT",
-    )
+        help="CSV file om de output in op te slaan. Default is output naar terminal STDOUT")
+
     argparser.add_argument(
         "fastq_files",
         action="store",
@@ -172,7 +173,7 @@ def process_fastq_file(file_path, cpus):
     return calculate_average_phredscores(results)
 
 
-def choose_output_format(phredscores, output_file):
+def choose_output_format(phredscores, output_file: str|None = None):
     """
     Function to decide what to do with presenting the results to the user.
     Also, prints after deciding.
@@ -181,8 +182,15 @@ def choose_output_format(phredscores, output_file):
     fieldnames = ["line_number", "average_phredscore"]
     if output_file:
         for filename, base_scores in phredscores.items():
+            # output filenaam opbouwen volgens de opdracht 1 pagina
+            if len(phredscores) == 1: out_file = output_file
+            else:
+                output_file_dir = os.path.dirname(output_file)
+                fastq_file_name = os.path.basename(filename)
+                output_file_extension = ".output.csv"
+                out_file = os.path.join(output_file_dir, fastq_file_name + output_file_extension)
             with open(
-                f"{os.path.basename(filename)}.output.csv", mode="w", encoding="UTF-8"
+                out_file, mode="w", encoding="UTF-8"
             ) as csvfile:
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                 # use csv object for writing to a csv file
@@ -196,7 +204,7 @@ def choose_output_format(phredscores, output_file):
     else:
         # print instead of write
         for filename, base_scores in phredscores.items():
-            print(os.path.basename(filename))
+            if len(phredscores) > 1: print(os.path.basename(filename))
             for base_average_score in range(len(base_scores)):  # pylint: disable=C0200
                 print(
                     f"{base_scores[base_average_score]['line_number']},{base_scores[base_average_score]['average_phredscore']}"
@@ -211,6 +219,13 @@ if __name__ == "__main__":
         average_phred_scores = process_fastq_file(fastq_file, args.n)
         save_results[fastq_file] = average_phred_scores
 
-    FILE = bool(args.o)
-    choose_output_format(save_results, output_file=FILE)
+    if not args.csvfile: # no output file specified, write to terminal
+        choose_output_format(save_results)
+    else:
+        # make sure output file can be re-opened in Luka's function
+        outfile_name = args.csvfile.name
+        args.csvfile.close()
+        choose_output_format(save_results, output_file=outfile_name)
+
+
     print("--End of results--")
