@@ -38,14 +38,14 @@ def parser():
     server_args = argparser.add_argument_group(
         title="Arguments when run in server mode"
     )
-    server_args.add_argument(
+    argparser.add_argument(
         "-o",
         action="store",
         dest="csvfile",
+        type=ap.FileType("w", encoding="UTF-8"),
         required=False,
-        help="CSV file to save the output to. \
-                              Defaulted output to terminal STDOUT",
-    )
+        help="CSV file om de output in op te slaan. Default is output naar terminal STDOUT")
+
     argparser.add_argument(
         "fastq_files",
         action="store",
@@ -172,11 +172,19 @@ class ParallelProcessing:
         print("Aaaaaand we're done for the server!")
         manager.shutdown()
         for file, aggregated_phredscores in file_results.items():
+            if not csvfile:  # no output file specified, write to terminal
+                out_file = None
+            elif csvfile and len(file_results) == 1:  # we have one file and write to a file
+                out_file = csvfile
+            elif csvfile and len(file_results) > 1: # we have multiple files and write to a file
+                output_file_dir = os.path.dirname(csvfile)
+                fastq_file_name = os.path.basename(file)
+                output_file_extension = ".output.csv"
+                out_file = os.path.join(output_file_dir, fastq_file_name + output_file_extension)
             self.write_results(
                 file,
                 self.calculate_average_phredscores(aggregated_phredscores),
-                csvfile,
-            )
+                out_file)
 
     def calculate_average_phredscores(self, all_phredscores: dict):
         """
@@ -193,7 +201,7 @@ class ParallelProcessing:
             for base_position, phredscores in sorted(all_phredscores.items())
         ]
 
-    def write_results(self, filename: str, average_scores: list, outputfile: str):
+    def write_results(self, filename: str, average_scores: list, outputfile: str|None):
         fieldnames = ["line_number", "average_phredscore"]
         if outputfile:
             with open(outputfile, mode="a", encoding="UTF-8") as csvfile:
@@ -433,7 +441,13 @@ if __name__ == "__main__":
     args = parser()
     if args.s and args.fastq_files:
         print("Server mode!")
-        FILE = args.csvfile if hasattr(args, "csvfile") else None
+        if not args.csvfile: # no output file specified, write to terminal
+            outfile_name = None
+        else:
+            outfile_name = args.csvfile.name
+            # make sure output file can be re-opened in Luka's function
+            args.csvfile.close()
+
         pp_m = ParallelProcessing(args.host, args.port)
         m_ps_c = PhredscoreCalculator(args.chunks)
 
@@ -441,7 +455,7 @@ if __name__ == "__main__":
         for fastq_file in args.fastq_files:
             all_chunks += m_ps_c.determine_chunks(fastq_file)
         server = mp.Process(
-            target=pp_m.runserver, args=(m_ps_c.process_chunk, all_chunks, FILE)
+            target=pp_m.runserver, args=(m_ps_c.process_chunk, all_chunks, outfile_name)
         )
         server.start()
         server.join()
