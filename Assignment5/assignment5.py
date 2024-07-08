@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 
 """
-Assignment 5 script implements Spark functionality to create a dataframe from a GBFF file and processes
-'records' accordingly with the questions.
+Assignment 5 implements spark functionality to create a dataframe from a BGFF file and processes
+records accordingly with the questions
 """
 
 # META DATA
@@ -22,7 +22,14 @@ from pyspark.sql.types import (
     IntegerType,
     StructField,
 )
-from pyspark.sql.functions import col, avg, count, when, expr, min as min_ps, max as max_ps
+from pyspark.sql.functions import (
+    col,
+    avg,
+    count,
+    expr,
+    min as min_ps,
+    max as max_ps,
+)
 from Bio.SeqFeature import CompoundLocation
 from Bio import SeqIO
 
@@ -109,16 +116,20 @@ df_features = (
 )
 
 # Keep records without cryptic genes i.e. not both CDS and gene present
-cryptic_noncoding_genes = (
-    df_features.groupBy("accession")
-    .agg(
-        count(when(col("type") == "CDS", 1)).alias("cds_count"),
-        count(when(col("type") == "gene", 1)).alias("gene_count"),
-    )
-    .filter((col("cds_count") == 0) & (col("gene_count") > 0))
-)
+all_genes = df_features.filter(col("type") == "gene").alias("genes")
+all_cds = df_features.filter(col("type") == "CDS").alias("CDS")
+# Join takes all corresponding genes with cdses based on the conditions
+# left_anti reverts those conditions to keep the cryptic genes.
 # Has no CDS-gene paired records
-crgenes_records_df = cryptic_noncoding_genes.select("accession")
+crgenes_records_df = all_genes.join(
+    all_cds,
+    on=[
+        all_genes.accession == all_cds.accession,
+        all_genes.location_start == all_cds.location_start,
+        all_genes.location_end == all_cds.location_end,
+    ],
+    how="left_anti",
+)
 
 
 def question1(frame):
@@ -136,31 +147,25 @@ def question2(frame, crgenes_records):
     """
     What is the ratio between coding and non-coding features? (Divide coding by non-coding totals)?
     """
-    # Get records of cryptic genes and count total of non-coding features inside
-    lacking_CDS_records = frame.join(crgenes_records, on="accession")
-    non_coding_count = lacking_CDS_records.filter(col("type") != "propeptide").count()
     # Keep all rows without cryptic genes
     frame_without_cryptic_genes = frame.join(
         crgenes_records, on="accession", how="left_anti"
     )
-    # Count all non-coding features inside
+    # Count all non-coding (ncRNA, rRNA) features inside
     remaining_non_coding_count = frame_without_cryptic_genes.filter(
-        col("type").isin(features[0:1])
+        col("type").isin(features[:2])
     ).count()
-    # Count possible coding propeptides in lacking CDS records
-    remaining_coding_count = lacking_CDS_records.filter(
-        col("type") == "propeptide"
-    ).count()
-    # Count all coding features inside
+    # Count all coding (propeptides, genes, CDS) features inside
     coding_count = frame_without_cryptic_genes.filter(
-        col("type").isin(features[2:4])
+        col("type").isin(features[2:])
     ).count()
-    all_non_coding = remaining_non_coding_count + non_coding_count
-    all_coding = remaining_coding_count + coding_count
+    non_coding_count = remaining_non_coding_count + crgenes_records.count()
 
-    print("Question2: What is the ratio between coding and non-coding features?")
     print(
-        f"That ratio of non_coding to coding features is {round((all_non_coding / all_coding) * 100, 3)}%. ((non_coding / coding) * 100%)"
+        "Question2: What is the ratio between coding and non-coding features? (coding / non-coding totals)"
+    )
+    print(
+        f"That ratio of coding to non-coding features is {round((coding_count / non_coding_count), 3)}."
     )
 
 
