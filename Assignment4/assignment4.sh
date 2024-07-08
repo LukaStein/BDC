@@ -14,8 +14,6 @@
 
 source /commons/conda/conda_load.sh
 
-THISDIR=$(dirname -- "$( readlink -f -- "$0"; )")
-mpiexec -n $SLURM_NTASKS python3 assignment4.py -c 10
-#/commons/Themas/Thema12/HPC/rnaseq.fastq
+mpiexec -n $SLURM_NTASKS python3 assignment4.py -c 10 /commons/Themas/Thema12/HPC/rnaseq.fastq
 
 
