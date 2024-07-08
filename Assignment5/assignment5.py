@@ -116,20 +116,38 @@ df_features = (
 )
 
 # Keep records without cryptic genes i.e. not both CDS and gene present
-all_genes = df_features.filter(col("type") == "gene").alias("genes")
-all_cds = df_features.filter(col("type") == "CDS").alias("CDS")
+all_genes = (
+    df_features.filter(col("type") == "gene")
+    .alias("genes")
+)
+all_cds = (
+    df_features.filter(col("type") == "CDS")
+    .alias("CDS")
+)
+
 # Join takes all corresponding genes with cdses based on the conditions
-# left_anti reverts those conditions to keep the cryptic genes.
-# Has no CDS-gene paired records
-crgenes_records_df = all_genes.join(
+coding_genes_records = all_genes.join(
     all_cds,
     on=[
         all_genes.accession == all_cds.accession,
         all_genes.location_start == all_cds.location_start,
         all_genes.location_end == all_cds.location_end,
+    ]
+).select(all_genes["*"])
+
+# Remove the coding features from the dataframe, since they are no features in these exercises.
+df_features = df_features.join(
+    coding_genes_records,
+    on=[
+        df_features.type == coding_genes_records.type,
+        df_features.accession == coding_genes_records.accession,
+        df_features.location_start == coding_genes_records.location_start,
+        df_features.location_end == coding_genes_records.location_end,
     ],
-    how="left_anti",
+    how='left_anti'
 )
+# Since all coding genes are removed the remaining genes are cryptic non-coding genes
+crgenes_records_df = df_features.filter(col("type") == "gene")
 
 
 def question1(frame):
